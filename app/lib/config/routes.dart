@@ -1,36 +1,69 @@
 import 'package:cricstatz/screens/home/home_screen.dart';
-import 'package:cricstatz/screens/match/create_match_screen.dart';
-import 'package:cricstatz/screens/match/match_list_screen.dart';
 import 'package:cricstatz/screens/match/toss_screen.dart';
-import 'package:cricstatz/screens/scoring/scoring_screen.dart';
-import 'package:cricstatz/screens/stats/match_stats_screen.dart';
-import 'package:cricstatz/screens/stats/player_stats_screen.dart';
-import 'package:cricstatz/screens/teams/create_team_screen.dart';
-import 'package:cricstatz/screens/teams/team_list_screen.dart';
+import 'package:cricstatz/screens/match/upcoming_fixtures_screen.dart';
+import 'package:cricstatz/screens/stats/results_screen.dart';
 import 'package:flutter/material.dart';
 
 class AppRoutes {
   static const String home = '/';
-  static const String teams = '/teams';
-  static const String createTeam = '/teams/create';
-  static const String matches = '/matches';
-  static const String createMatch = '/matches/create';
   static const String toss = '/matches/toss';
-  static const String scoring = '/scoring';
-  static const String playerStats = '/stats/player';
-  static const String matchStats = '/stats/match';
+  static const String upcoming = '/matches/upcoming';
+  static const String results = '/results';
 
   static Map<String, WidgetBuilder> get routeTable => {
         home: (_) => const HomeScreen(),
-        teams: (_) => const TeamListScreen(),
-        createTeam: (_) => const CreateTeamScreen(),
-        matches: (_) => const MatchListScreen(),
-        createMatch: (_) => const CreateMatchScreen(),
         toss: (_) => const TossScreen(),
-        scoring: (_) => const ScoringScreen(),
-        playerStats: (_) => const PlayerStatsScreen(),
-        matchStats: (_) => const MatchStatsScreen(),
+        upcoming: (_) => const UpcomingFixturesScreen(),
+        results: (_) => const ResultsScreen(),
       };
+
+  /// Smooth transition to ResultsScreen (fade + slight slide).
+  static Route<void> buildResultsRoute() {
+    return PageRouteBuilder<void>(
+      settings: const RouteSettings(name: results),
+      pageBuilder: (context, animation, secondaryAnimation) =>
+          const ResultsScreen(),
+      transitionsBuilder: (context, animation, secondaryAnimation, child) {
+        const curve = Curves.easeOutCubic;
+        final curved = CurvedAnimation(parent: animation, curve: curve);
+        return FadeTransition(
+          opacity: curved,
+          child: SlideTransition(
+            position: Tween<Offset>(
+              begin: const Offset(0.04, 0),
+              end: Offset.zero,
+            ).animate(curved),
+            child: child,
+          ),
+        );
+      },
+      transitionDuration: const Duration(milliseconds: 280),
+    );
+  }
+
+  /// Smooth transition to UpcomingFixturesScreen (fade + slight slide).
+  static Route<void> buildUpcomingRoute() {
+    return PageRouteBuilder<void>(
+      settings: const RouteSettings(name: upcoming),
+      pageBuilder: (context, animation, secondaryAnimation) =>
+          const UpcomingFixturesScreen(),
+      transitionsBuilder: (context, animation, secondaryAnimation, child) {
+        const curve = Curves.easeOutCubic;
+        final curved = CurvedAnimation(parent: animation, curve: curve);
+        return FadeTransition(
+          opacity: curved,
+          child: SlideTransition(
+            position: Tween<Offset>(
+              begin: const Offset(0.04, 0),
+              end: Offset.zero,
+            ).animate(curved),
+            child: child,
+          ),
+        );
+      },
+      transitionDuration: const Duration(milliseconds: 280),
+    );
+  }
 
   const AppRoutes._();
 }
