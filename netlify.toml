@@ -1,0 +1,33 @@
+[build]
+  # Serve the static site from the "website" directory
+  publish = "website"
+  command = ""
+
+[[headers]]
+  # Serve APKs with the correct content type
+  for = "/downloads/*.apk"
+  [headers.values]
+    Content-Type = "application/vnd.android.package-archive"
+
+[[redirects]]
+  # Pretty download URL → actual APK file
+  from = "/download"
+  to = "/downloads/CricStatz-latest.apk"
+  status = 301
+  force = true
+
+[build]
+  # We already have a static site in the "website" folder.
+  # No build step is required; Netlify will just serve the files as‑is.
+  publish = "website"
+
+  # If you later add a build step (e.g. npm build), set the command here.
+  # For now we leave it empty to tell Netlify this is a pure static site.
+  command = ""
+
+[[headers]]
+  # Ensure APK files are served with the correct content type.
+  for = "/downloads/*.apk"
+  [headers.values]
+    Content-Type = "application/vnd.android.package-archive"
+
