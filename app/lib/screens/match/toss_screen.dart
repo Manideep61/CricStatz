@@ -1,5 +1,7 @@
-import 'package:cricstatz/config/routes.dart';
 import 'package:cricstatz/config/palette.dart';
+import 'package:cricstatz/config/routes.dart';
+import 'package:cricstatz/models/match.dart';
+import 'package:cricstatz/services/match_service.dart';
 import 'package:cricstatz/widgets/coin_flip_widget.dart';
 import 'package:flutter/material.dart';
 
@@ -10,215 +12,319 @@ class TossScreen extends StatefulWidget {
   State<TossScreen> createState() => _TossScreenState();
 }
 
-enum _TossPhase { selection, flipping, result }
+enum TossStep { choosingCaller, flipping, results }
 
-class _TossScreenState extends State<TossScreen> with TickerProviderStateMixin {
-  String? selectedTeam;
-  _TossPhase _phase = _TossPhase.selection;
-  bool _resultHeads = true;
-  final _coinKey = GlobalKey<CoinFlipWidgetState>();
-
-  late final AnimationController _resultCtrl;
-  late final Animation<double> _resultFade;
-  late final Animation<double> _resultScale;
-
-  @override
-  void initState() {
-    super.initState();
-    _resultCtrl = AnimationController(
-      duration: const Duration(milliseconds: 800),
-      vsync: this,
-    );
-    _resultFade = CurvedAnimation(
-      parent: _resultCtrl,
-      curve: Curves.easeOut,
-    );
-    _resultScale = Tween(begin: 0.5, end: 1.0).animate(
-      CurvedAnimation(parent: _resultCtrl, curve: Curves.elasticOut),
-    );
-  }
+class _TossScreenState extends State<TossScreen> {
+  final GlobalKey<CoinFlipWidgetState> _coinKey = GlobalKey();
+  TossStep _step = TossStep.choosingCaller;
+  
+  Match? _match;
+  String? _tossCaller; // Team ID
+  String? _tossWinner; // Team ID
+  String? _decision;    // 'BAT' or 'BOWL'
+  String _callSide = 'HEADS'; // 'HEADS' or 'TAILS'
 
   @override
-  void dispose() {
-    _resultCtrl.dispose();
-    super.dispose();
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _match ??= ModalRoute.of(context)?.settings.arguments as Match?;
+    if (_match != null && _tossCaller == null) {
+      _tossCaller = _match!.teamAId;
+    }
   }
 
-  Future<void> _handleFlipCoin() async {
-    if (selectedTeam == null) return;
+  void _onFlip() async {
+    if (_tossCaller == null) return;
+    
+    setState(() => _step = TossStep.flipping);
+    
+    // The coin widget returns a bool: true=Heads, false=Tails.
+    // If the outcome matches the caller's chosen side, the caller wins.
+    final isHeads = await _coinKey.currentState?.flip();
+    
+    if (isHeads != null) {
+      setState(() {
+        final callerChoseHeads = _callSide == 'HEADS';
+        final callerWins =
+            (isHeads && callerChoseHeads) || (!isHeads && !callerChoseHeads);
 
-    setState(() => _phase = _TossPhase.flipping);
+        if (isHeads) {
+          // Just for visual feedback; winner is based on callerWins below.
+        } else {
+          // Same here; outcome is already in isHeads.
+        }
 
-    _resultHeads = await _coinKey.currentState!.flip();
+        _tossWinner = callerWins
+            ? _tossCaller
+            : (_tossCaller == _match?.teamAId
+                ? _match?.teamBId
+                : _match?.teamAId);
 
-    if (mounted) {
-      setState(() => _phase = _TossPhase.result);
-      _resultCtrl.forward(from: 0);
+        _step = TossStep.results;
+      });
     }
   }
 
   @override
   Widget build(BuildContext context) {
-    final isResult = _phase == _TossPhase.result;
-    final isFlipping = _phase == _TossPhase.flipping;
-    final isSelection = _phase == _TossPhase.selection;
+    if (_match == null) {
+      return const Scaffold(body: Center(child: Text('No match data found', style: TextStyle(color: Colors.white))));
+    }
 
     return Scaffold(
       body: DecoratedBox(
         decoration: const BoxDecoration(gradient: AppPalette.surfaceGradient),
         child: SafeArea(
-          child: Padding(
-            padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                // ── Header ──
-                Row(
-                  children: [
-                    IconButton(
-                      onPressed:
-                          isSelection ? () => Navigator.pop(context) : null,
-                      icon: const Icon(Icons.arrow_back,
-                          color: AppPalette.textPrimary),
-                    ),
-                    Expanded(
-                      child: Text(
-                        'MATCH TOSS',
-                        textAlign: TextAlign.center,
-                        style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                              color: AppPalette.textPrimary,
-                              fontWeight: FontWeight.w800,
-                              letterSpacing: 1.1,
-                            ),
-                      ),
-                    ),
-                    const SizedBox(width: 48),
-                  ],
-                ),
-                const SizedBox(height: 16),
-
-                // ── Title ──
-                Text(
-                  isResult
-                      ? 'Toss Result'
-                      : selectedTeam == null
-                          ? 'Who Won the Toss?'
-                          : 'Toss For $selectedTeam',
-                  textAlign: TextAlign.center,
-                  style: Theme.of(context).textTheme.headlineMedium?.copyWith(
-                        color: AppPalette.textPrimary,
-                        fontWeight: FontWeight.w800,
-                      ),
-                ),
-                const SizedBox(height: 4),
-
-                if (!isResult)
-                  const Text(
-                    'Select the team that called it correctly',
-                    textAlign: TextAlign.center,
-                    style:
-                        TextStyle(color: AppPalette.textMuted, fontSize: 20),
-                  ),
-                const SizedBox(height: 24),
-
-                // ── Team cards — fade during flip, collapse in result ──
-                AnimatedOpacity(
-                  opacity: isFlipping ? 0.3 : (isResult ? 0.0 : 1.0),
-                  duration: const Duration(milliseconds: 400),
-                  child: AnimatedSize(
-                    duration: const Duration(milliseconds: 400),
-                    curve: Curves.easeInOut,
-                    child: isResult
-                        ? const SizedBox.shrink()
-                        : IgnorePointer(
-                            ignoring: !isSelection,
-                            child: _buildTeamCards(),
-                          ),
+          child: Column(
+            children: [
+              _buildHeader(),
+              Expanded(
+                child: SingleChildScrollView(
+                  padding: const EdgeInsets.symmetric(horizontal: 24),
+                  child: Column(
+                    children: [
+                      const SizedBox(height: 20),
+                      if (_step == TossStep.choosingCaller) _buildCallerSelection(),
+                      
+                      const SizedBox(height: 40),
+                      CoinFlipWidget(key: _coinKey),
+                      
+                      const SizedBox(height: 40),
+                      if (_step == TossStep.results) _buildTossResult(),
+                      
+                      const SizedBox(height: 40),
+                    ],
                   ),
                 ),
-
-                const Spacer(),
-
-                // ── Coin — SAME tree position in ALL phases ──
-                Center(child: CoinFlipWidget(key: _coinKey)),
-
-                const SizedBox(height: 16),
-
-                // ── Result display ──
-                if (isResult) _buildResultDisplay(),
-
-                const Spacer(),
-
-                // ── Button ──
-                _buildButton(isSelection, isResult, isFlipping),
-              ],
-            ),
+              ),
+              _buildBottomAction(),
+            ],
           ),
         ),
       ),
     );
   }
 
-  // ── Helpers ──────────────────────────────────────────────────
+  Widget _buildHeader() {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+      child: Row(
+        children: [
+          IconButton(
+            onPressed: () => Navigator.pop(context),
+            icon: const Icon(Icons.arrow_back_ios_new, color: AppPalette.textPrimary, size: 20),
+          ),
+          const Expanded(
+            child: Center(
+              child: Text(
+                'Toss',
+                style: TextStyle(
+                  color: AppPalette.textPrimary,
+                  fontSize: 18,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+            ),
+          ),
+          const SizedBox(width: 48),
+        ],
+      ),
+    );
+  }
 
-  Widget _buildTeamCards() {
-    return Row(
+  Widget _buildCallerSelection() {
+    return Column(
       children: [
-        Expanded(
-          child: _TeamChoiceCard(
-            label: 'TEAM A',
-            selected: selectedTeam == 'Team A',
-            onTap: () => setState(() => selectedTeam = 'Team A'),
-            badgeLabel: 'A',
-          ),
+        const Text(
+          'Who is calling the toss?',
+          style: TextStyle(color: AppPalette.textMuted, fontSize: 16),
         ),
-        const SizedBox(width: 12),
-        Expanded(
-          child: _TeamChoiceCard(
-            label: 'TEAM B',
-            selected: selectedTeam == 'Team B',
-            onTap: () => setState(() => selectedTeam = 'Team B'),
-            badgeLabel: 'B',
-          ),
+        const SizedBox(height: 24),
+        Row(
+          children: [
+            Expanded(child: _TeamTossCard(
+              name: _match!.teamAId, 
+              isSelected: _tossCaller == _match!.teamAId,
+              onTap: () => setState(() => _tossCaller = _match!.teamAId),
+            )),
+            const SizedBox(width: 16),
+            Expanded(child: _TeamTossCard(
+              name: _match!.teamBId, 
+              isSelected: _tossCaller == _match!.teamBId,
+              onTap: () => setState(() => _tossCaller = _match!.teamBId),
+            )),
+          ],
+        ),
+        const SizedBox(height: 24),
+        const Text(
+          'What is the call?',
+          style: TextStyle(color: AppPalette.textMuted, fontSize: 16),
+        ),
+        const SizedBox(height: 16),
+        Row(
+          children: [
+            Expanded(
+              child: _DecisionButton(
+                label: 'HEADS',
+                icon: Icons.circle,
+                isSelected: _callSide == 'HEADS',
+                onTap: () => setState(() => _callSide = 'HEADS'),
+              ),
+            ),
+            const SizedBox(width: 16),
+            Expanded(
+              child: _DecisionButton(
+                label: 'TAILS',
+                icon: Icons.circle_outlined,
+                isSelected: _callSide == 'TAILS',
+                onTap: () => setState(() => _callSide = 'TAILS'),
+              ),
+            ),
+          ],
         ),
       ],
     );
   }
 
-  Widget _buildResultDisplay() {
-    final isHeads = _resultHeads;
-    final glowColor =
-        isHeads ? const Color(0xFFFFD700) : const Color(0xFFC0C0C0);
+  Widget _buildTossResult() {
+    return Column(
+      children: [
+        Text(
+          '$_tossWinner won the toss!',
+          style: const TextStyle(color: AppPalette.accent, fontSize: 20, fontWeight: FontWeight.bold),
+        ),
+        const SizedBox(height: 12),
+        const Text(
+          'Choose to Bat or Bowl',
+          style: TextStyle(color: AppPalette.textMuted, fontSize: 16),
+        ),
+        const SizedBox(height: 24),
+        Row(
+          children: [
+            Expanded(child: _DecisionButton(
+              label: 'BAT',
+              icon: Icons.sports_cricket,
+              isSelected: _decision == 'BAT',
+              onTap: () => setState(() => _decision = 'BAT'),
+            )),
+            const SizedBox(width: 16),
+            Expanded(child: _DecisionButton(
+              label: 'BOWL',
+              icon: Icons.sports_baseball,
+              isSelected: _decision == 'BOWL',
+              onTap: () => setState(() => _decision = 'BOWL'),
+            )),
+          ],
+        ),
+      ],
+    );
+  }
 
-    return FadeTransition(
-      opacity: _resultFade,
-      child: ScaleTransition(
-        scale: _resultScale,
+  Widget _buildBottomAction() {
+    String label = 'FLIP COIN';
+    VoidCallback? action = _onFlip;
+    bool visible = true;
+
+    if (_step == TossStep.flipping) {
+      visible = false;
+    } else if (_step == TossStep.results) {
+      label = 'START SCORING';
+      action = _decision != null ? _onStartScoring : null;
+    }
+
+    if (!visible) return const SizedBox.shrink();
+
+    return Padding(
+      padding: const EdgeInsets.all(24),
+      child: SizedBox(
+        width: double.infinity,
+        child: FilledButton(
+          onPressed: action,
+          style: FilledButton.styleFrom(
+            backgroundColor: action != null ? AppPalette.accent : AppPalette.accent.withOpacity(0.3),
+            foregroundColor: AppPalette.bgSecondary,
+            padding: const EdgeInsets.symmetric(vertical: 16),
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+          ),
+          child: Text(
+            label,
+            style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w800),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Future<void> _onStartScoring() async {
+    if (_match == null || _tossWinner == null || _decision == null) return;
+
+    // Show loading dialog
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => const Center(child: CircularProgressIndicator(color: AppPalette.accent)),
+    );
+
+    try {
+      await MatchService.updateMatchToss(
+        _match!.id,
+        _tossWinner!,
+        _decision!,
+      );
+
+      if (mounted) {
+        Navigator.pop(context); // Close loading dialog
+        Navigator.pushNamed(
+          context,
+          AppRoutes.liveUpdate,
+          arguments: {
+            'match': _match,
+            'tossWinner': _tossWinner,
+            'decision': _decision,
+          },
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        Navigator.pop(context); // Close loading dialog
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Failed to update toss: $e')),
+        );
+      }
+    }
+  }
+}
+
+class _TeamTossCard extends StatelessWidget {
+  const _TeamTossCard({required this.name, required this.isSelected, required this.onTap});
+  final String name;
+  final bool isSelected;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.symmetric(vertical: 24),
+        decoration: BoxDecoration(
+          color: isSelected ? AppPalette.accent.withOpacity(0.1) : AppPalette.bgSecondary,
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: isSelected ? AppPalette.accent : AppPalette.cardStroke, width: 2),
+        ),
         child: Column(
           children: [
-            // HEADS / TAILS text with glow shadow
-            Text(
-              isHeads ? 'HEADS' : 'TAILS',
-              style: TextStyle(
-                fontSize: 36,
-                fontWeight: FontWeight.w900,
-                color: glowColor,
-                letterSpacing: 3.0,
-                shadows: [
-                  Shadow(
-                    color: glowColor.withValues(alpha: 0.6),
-                    blurRadius: 14,
-                  ),
-                ],
-              ),
+            CircleAvatar(
+              radius: 30,
+              backgroundColor: AppPalette.cardOverlay,
+              child: Text(name[0], style: const TextStyle(color: Colors.white, fontSize: 24, fontWeight: FontWeight.bold)),
             ),
-            const SizedBox(height: 6),
-
+            const SizedBox(height: 12),
             Text(
-              '$selectedTeam won the toss!',
-              style: const TextStyle(
-                color: AppPalette.textMuted,
-                fontSize: 16,
+              name,
+              style: TextStyle(
+                color: isSelected ? AppPalette.accent : Colors.white,
+                fontWeight: FontWeight.bold,
               ),
             ),
           ],
@@ -226,132 +332,37 @@ class _TossScreenState extends State<TossScreen> with TickerProviderStateMixin {
       ),
     );
   }
-
-  Widget _buildButton(bool isSelection, bool isResult, bool isFlipping) {
-    // During flip, show a disabled placeholder to hold layout space
-    if (isFlipping) return const SizedBox(height: 56);
-
-    if (isResult) {
-      return FadeTransition(
-        opacity: _resultFade,
-        child: FilledButton(
-          onPressed: () => Navigator.pushNamed(context, AppRoutes.scoring),
-          style: _buttonStyle(),
-          child: const Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Text(
-                'START MATCH',
-                style: TextStyle(
-                    fontSize: 24,
-                    fontWeight: FontWeight.w700,
-                    letterSpacing: 1.1),
-              ),
-              SizedBox(width: 8),
-              Icon(Icons.arrow_forward, size: 20),
-            ],
-          ),
-        ),
-      );
-    }
-
-    return FilledButton(
-      onPressed: selectedTeam == null ? null : _handleFlipCoin,
-      style: _buttonStyle(withDisabled: true),
-      child: const Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(Icons.autorenew, size: 20),
-          SizedBox(width: 10),
-          Text(
-            'FLIP COIN',
-            style: TextStyle(
-                fontSize: 24,
-                fontWeight: FontWeight.w700,
-                letterSpacing: 1.1),
-          ),
-        ],
-      ),
-    );
-  }
-
-  ButtonStyle _buttonStyle({bool withDisabled = false}) {
-    return FilledButton.styleFrom(
-      backgroundColor: const Color(0xFF0A2A62),
-      disabledBackgroundColor:
-          withDisabled ? const Color(0xFF233A64) : null,
-      foregroundColor: AppPalette.textPrimary,
-      padding: const EdgeInsets.symmetric(vertical: 16),
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-    );
-  }
 }
 
-// ── Team Choice Card ────────────────────────────────────────
-
-class _TeamChoiceCard extends StatelessWidget {
-  const _TeamChoiceCard({
-    required this.label,
-    required this.selected,
-    required this.onTap,
-    required this.badgeLabel,
-  });
-
+class _DecisionButton extends StatelessWidget {
+  const _DecisionButton({required this.label, required this.icon, required this.isSelected, required this.onTap});
   final String label;
-  final bool selected;
+  final IconData icon;
+  final bool isSelected;
   final VoidCallback onTap;
-  final String badgeLabel;
 
   @override
   Widget build(BuildContext context) {
-    return InkWell(
+    return GestureDetector(
       onTap: onTap,
-      borderRadius: BorderRadius.circular(16),
       child: Container(
-        padding: const EdgeInsets.fromLTRB(12, 18, 12, 20),
+        padding: const EdgeInsets.symmetric(vertical: 20),
         decoration: BoxDecoration(
-          color: const Color(0xAA0B1D3A),
-          borderRadius: BorderRadius.circular(16),
-          border: Border.all(
-              color: selected ? AppPalette.accent : const Color(0xFF1F3352),
-              width: selected ? 2 : 1),
+          color: isSelected ? AppPalette.accent : AppPalette.bgSecondary,
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: isSelected ? Colors.transparent : AppPalette.cardStroke),
         ),
         child: Column(
           children: [
-            Container(
-              width: 100,
-              height: 100,
-              decoration: const BoxDecoration(
-                shape: BoxShape.circle,
-                gradient: LinearGradient(
-                  colors: [Color(0xFF0B2C66), Color(0xFF243A5C)],
-                  begin: Alignment.topLeft,
-                  end: Alignment.bottomRight,
-                ),
-              ),
-              child: Center(
-                child: Container(
-                  width: 64,
-                  height: 64,
-                  color: const Color(0xFF0E2B54),
-                  alignment: Alignment.center,
-                  child: Text(
-                    badgeLabel,
-                    style: const TextStyle(
-                        color: Color(0xFFFACC15),
-                        fontSize: 36,
-                        fontWeight: FontWeight.w700),
-                  ),
-                ),
-              ),
-            ),
-            const SizedBox(height: 22),
+            Icon(icon, color: isSelected ? AppPalette.bgSecondary : Colors.white, size: 32),
+            const SizedBox(height: 8),
             Text(
               label,
-              style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                    color: AppPalette.textPrimary,
-                    fontWeight: FontWeight.w700,
-                  ),
+              style: TextStyle(
+                color: isSelected ? AppPalette.bgSecondary : Colors.white,
+                fontWeight: FontWeight.w800,
+                letterSpacing: 1.2,
+              ),
             ),
           ],
         ),
