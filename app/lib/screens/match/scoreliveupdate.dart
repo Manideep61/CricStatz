@@ -67,6 +67,15 @@ class _ScoreLiveUpdateScreenState extends State<ScoreLiveUpdateScreen> {
   int _pendingDismissedIndex = -1; // which position needs replacement after wicket
   bool _openingBattersSelected = false; // true once both openers are chosen
 
+  // Debounce to prevent double-tap registering twice in release mode
+  DateTime _lastTapTime = DateTime(2000);
+  bool get _canProcessTap {
+    final now = DateTime.now();
+    if (now.difference(_lastTapTime).inMilliseconds < 300) return false;
+    _lastTapTime = now;
+    return true;
+  }
+
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
@@ -233,11 +242,17 @@ class _ScoreLiveUpdateScreenState extends State<ScoreLiveUpdateScreen> {
           }
         });
       } else if (_batterPickerMode == 'new_batter') {
-        // Replace the dismissed player's position
+        // Replace the dismissed/retired player's position
         if (_pendingDismissedIndex == _strikerIndex) {
           _strikerIndex = index;
         } else {
           _nonStrikerIndex = index;
+        }
+        // Clear retired flag if a retired batsman is coming back
+        final player = _battingTeamPlayers[index];
+        if (_playerStats[player.id]?['retired'] == true) {
+          _playerStats[player.id]!['retired'] = false;
+          _playerStats[player.id]!.remove('dismissal');
         }
         _pendingDismissedIndex = -1;
         _isBatterPickerVisible = false;
@@ -250,7 +265,9 @@ class _ScoreLiveUpdateScreenState extends State<ScoreLiveUpdateScreen> {
     final available = <int>[];
     for (var i = 0; i < _battingTeamPlayers.length; i++) {
       final player = _battingTeamPlayers[i];
-      final isOut = _playerStats[player.id]?['out'] ?? false;
+      final stats = _playerStats[player.id];
+      final isOut = stats?['out'] ?? false;
+      final isRetired = stats?['retired'] ?? false;
       if (isOut) continue;
       // In opening mode, don't exclude anyone already in middle (since we're picking them)
       if (_batterPickerMode == 'opening_striker') {
@@ -260,12 +277,167 @@ class _ScoreLiveUpdateScreenState extends State<ScoreLiveUpdateScreen> {
         if (i == _strikerIndex) continue;
         available.add(i);
       } else {
-        // new_batter mode: exclude the two currently in middle (one is dismissed but still indexed)
+        // new_batter mode: exclude currently in middle and retired batsmen
         final inMiddle = i == _strikerIndex || i == _nonStrikerIndex;
-        if (!inMiddle) available.add(i);
+        if (!inMiddle && !isRetired) available.add(i);
+      }
+    }
+
+    // If no non-retired batsmen available, allow retired batsmen to come back
+    if (available.isEmpty && _batterPickerMode == 'new_batter') {
+      for (var i = 0; i < _battingTeamPlayers.length; i++) {
+        final player = _battingTeamPlayers[i];
+        final stats = _playerStats[player.id];
+        final isOut = stats?['out'] ?? false;
+        final isRetired = stats?['retired'] ?? false;
+        final inMiddle = i == _strikerIndex || i == _nonStrikerIndex;
+        if (!isOut && isRetired && !inMiddle) available.add(i);
       }
     }
     return available;
+  }
+
+  void _retireBatsman() {
+    if (!_canProcessTap) return;
+    if (_battingTeamPlayers.isEmpty || !_openingBattersSelected) return;
+
+    // Show dialog to pick which batsman to retire
+    showDialog(
+      context: context,
+      builder: (context) => BackdropFilter(
+        filter: ImageFilter.blur(sigmaX: 8, sigmaY: 8),
+        child: Dialog(
+          backgroundColor: Colors.transparent,
+          child: Container(
+            padding: const EdgeInsets.all(24),
+            decoration: BoxDecoration(
+              color: const Color(0xFF0F172A).withAlpha((0.95 * 255).toInt()),
+              borderRadius: BorderRadius.circular(28),
+              border: Border.all(
+                  color: AppPalette.accent.withAlpha((0.2 * 255).toInt())),
+            ),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      color:
+                          AppPalette.accent.withAlpha((0.1 * 255).toInt())),
+                  child: const Icon(Icons.directions_walk_rounded,
+                      color: AppPalette.accent, size: 32),
+                ),
+                const SizedBox(height: 16),
+                const Text('RETIRE BATSMAN',
+                    style: TextStyle(
+                        color: Colors.white,
+                        fontWeight: FontWeight.w900,
+                        fontSize: 22,
+                        letterSpacing: 1.5)),
+                const SizedBox(height: 8),
+                const Text('Select batsman to retire',
+                    style: TextStyle(
+                        color: AppPalette.textMuted, fontSize: 14)),
+                const SizedBox(height: 24),
+                ...[
+                  if (_strikerIndex >= 0 &&
+                      _strikerIndex < _battingTeamPlayers.length)
+                    MapEntry(
+                        _strikerIndex, _battingTeamPlayers[_strikerIndex]),
+                  if (_nonStrikerIndex >= 0 &&
+                      _nonStrikerIndex < _battingTeamPlayers.length &&
+                      _nonStrikerIndex != _strikerIndex)
+                    MapEntry(_nonStrikerIndex,
+                        _battingTeamPlayers[_nonStrikerIndex]),
+                ].map((entry) {
+                  final index = entry.key;
+                  final player = entry.value;
+                  final isStriker = index == _strikerIndex;
+                  return Padding(
+                    padding: const EdgeInsets.only(bottom: 8),
+                    child: ListTile(
+                      shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12)),
+                      tileColor: AppPalette.cardStroke
+                          .withAlpha((0.3 * 255).toInt()),
+                      leading: CircleAvatar(
+                        backgroundColor: isStriker
+                            ? AppPalette.accent
+                            : AppPalette.textMuted,
+                        child: Text(
+                          player.name
+                              .split(' ')
+                              .map((w) =>
+                                  w.isNotEmpty ? w[0].toUpperCase() : '')
+                              .join(),
+                          style: const TextStyle(color: Colors.white),
+                        ),
+                      ),
+                      title: Text(
+                        '${player.name} ${isStriker ? "(Striker)" : "(Non-Striker)"}',
+                        style: const TextStyle(color: Colors.white),
+                      ),
+                      subtitle: Text(
+                        '${_playerStats[player.id]?['runs'] ?? 0}(${_playerStats[player.id]?['balls'] ?? 0})',
+                        style: const TextStyle(
+                            color: AppPalette.textMuted, fontSize: 12),
+                      ),
+                      onTap: () => _finalizeRetire(index),
+                    ),
+                  );
+                }),
+                const SizedBox(height: 16),
+                TextButton(
+                  onPressed: () => Navigator.pop(context),
+                  child: const Text('CANCEL',
+                      style: TextStyle(
+                          color: AppPalette.textMuted,
+                          fontWeight: FontWeight.bold,
+                          letterSpacing: 1)),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  void _finalizeRetire(int retiredIndex) {
+    Navigator.pop(context);
+    if (retiredIndex < 0 || retiredIndex >= _battingTeamPlayers.length) return;
+
+    _saveHistory();
+
+    final retiredPlayer = _battingTeamPlayers[retiredIndex];
+    setState(() {
+      _playerStats.putIfAbsent(
+          retiredPlayer.id,
+          () => {
+                'runs': 0,
+                'balls': 0,
+                'fours': 0,
+                'sixes': 0,
+                'sr': '0.0',
+                'out': false,
+              });
+      _playerStats[retiredPlayer.id]!['retired'] = true;
+      _playerStats[retiredPlayer.id]!['dismissal'] = 'Retired';
+    });
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text('${retiredPlayer.name} retired',
+            style: const TextStyle(fontWeight: FontWeight.bold)),
+        backgroundColor: AppPalette.accent,
+        duration: const Duration(seconds: 1),
+      ),
+    );
+
+    // Bring in a replacement batsman
+    _bringNextBatterIn(retiredIndex);
+    _syncScore();
   }
 
   bool get _hasValidBowlerIndex =>
@@ -296,10 +468,10 @@ class _ScoreLiveUpdateScreenState extends State<ScoreLiveUpdateScreen> {
       final stats = _playerStats[player.id];
       if (stats == null) continue;
       final ballsBowled = (stats['balls_bowled'] ?? 0) as int;
+      final runsConceded = (stats['runs_conceded'] ?? 0) as int;
       if (ballsBowled <= 0) continue;
       final overs = ballsBowled ~/ 6;
       final balls = ballsBowled % 6;
-      final runsConceded = (stats['runs'] ?? 0) as int;
       final econ = ballsBowled > 0
           ? (runsConceded / (ballsBowled / 6.0)).toStringAsFixed(2)
           : '0.0';
@@ -402,7 +574,7 @@ class _ScoreLiveUpdateScreenState extends State<ScoreLiveUpdateScreen> {
       final bowlerPlayer = currentBowler;
       final bowlerStats = _playerStats[bowlerPlayer.id] ?? {};
       final ballsBowled = (bowlerStats['balls_bowled'] ?? 0) as int;
-      final runsConceded = (bowlerStats['runs'] ?? 0) as int;
+      final runsConceded = (bowlerStats['runs_conceded'] ?? 0) as int;
 
       // Convert balls bowled to overs format
       final overs = ballsBowled ~/ 6;
@@ -558,7 +730,7 @@ class _ScoreLiveUpdateScreenState extends State<ScoreLiveUpdateScreen> {
             final bowlerId = _bowlingTeamPlayers[bowlerIndex].id;
             _playerStats[bowlerId] = {
               ...(_playerStats[bowlerId] ?? <String, dynamic>{}),
-              'runs': _parseIntSafe(bowler.runs),
+              'runs_conceded': _parseIntSafe(bowler.runs),
               'wickets': _parseIntSafe(bowler.wickets),
               'balls_bowled': _ballsFromOversString(bowler.overs),
               'economy': bowler.econ,
@@ -675,6 +847,7 @@ class _ScoreLiveUpdateScreenState extends State<ScoreLiveUpdateScreen> {
                 'sr': '0.0',
                 'out': false,
                 'balls_bowled': 0,
+                'runs_conceded': 0,
                 'wickets': 0,
                 'economy': '0.0'
               };
@@ -846,14 +1019,15 @@ class _ScoreLiveUpdateScreenState extends State<ScoreLiveUpdateScreen> {
             'sr': '0.0',
             'out': false,
             'balls_bowled': 0,
+            'runs_conceded': 0,
             'wickets': 0,
             'economy': '0.0'
           };
         }
         _playerStats[bowler.id]!['balls_bowled'] =
             (_playerStats[bowler.id]!['balls_bowled'] as int) + 1;
-        _playerStats[bowler.id]!['runs'] =
-            (_playerStats[bowler.id]!['runs'] as int) + runDelta;
+        _playerStats[bowler.id]!['runs_conceded'] =
+            ((_playerStats[bowler.id]!['runs_conceded'] ?? 0) as int) + runDelta;
         if (isWicket && creditWicketToBowler) {
           _playerStats[bowler.id]!['wickets'] =
               (_playerStats[bowler.id]!['wickets'] as int) + 1;
@@ -976,7 +1150,7 @@ class _ScoreLiveUpdateScreenState extends State<ScoreLiveUpdateScreen> {
               final ballsBowled = (stats['balls_bowled'] ?? 0) as int;
               final overs = ballsBowled ~/ 6;
               final balls = ballsBowled % 6;
-              final runsConceded = (stats['runs'] ?? 0) as int;
+              final runsConceded = (stats['runs_conceded'] ?? 0) as int;
               final econ = ballsBowled > 0
                   ? (runsConceded / (ballsBowled / 6.0)).toStringAsFixed(2)
                   : '0.0';
@@ -1114,6 +1288,7 @@ class _ScoreLiveUpdateScreenState extends State<ScoreLiveUpdateScreen> {
   }
 
   void _addRun(int run, {bool isExtra = false, String? label}) {
+    if (!_canProcessTap) return;
     final ballLabel = label ?? run.toString();
     final countsAsLegalBall = !isExtra;
 
@@ -1126,6 +1301,7 @@ class _ScoreLiveUpdateScreenState extends State<ScoreLiveUpdateScreen> {
   }
 
   void _addExtra(String type) {
+    if (!_canProcessTap) return;
     final isLegal = type == 'LB' || type == 'B';
     _applyBall(
       label: type,
@@ -1136,6 +1312,7 @@ class _ScoreLiveUpdateScreenState extends State<ScoreLiveUpdateScreen> {
   }
 
   void _onWicket() {
+    if (!_canProcessTap) return;
     _showWicketPopup();
   }
 
@@ -1915,7 +2092,7 @@ class _ScoreLiveUpdateScreenState extends State<ScoreLiveUpdateScreen> {
     final overs = ballsBowled ~/ 6;
     final balls = ballsBowled % 6;
     final maidens = (bowlerStats['maidens'] ?? 0);
-    final runs = (bowlerStats['runs'] ?? 0);
+    final runs = (bowlerStats['runs_conceded'] ?? 0);
     final wickets = (bowlerStats['wickets'] ?? 0);
     final econ = ballsBowled > 0
         ? (runs / (ballsBowled / 6.0)).toStringAsFixed(2)
@@ -2034,6 +2211,10 @@ class _ScoreLiveUpdateScreenState extends State<ScoreLiveUpdateScreen> {
                           onTap: () => _addExtra('B'),
                           isSpecial: true),
                       _KeyButton(label: 'W', onTap: _onWicket, isAlert: true),
+                      _KeyButton(
+                          label: 'RET',
+                          onTap: _retireBatsman,
+                          isSpecial: true),
                       _KeyButton(
                           icon: Icons.undo, onTap: _undo, isSpecial: true),
                     ],

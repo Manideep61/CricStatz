@@ -60,6 +60,14 @@ class _ResultsScreenState extends State<ResultsScreen> {
         .map((entry) => _ResultSection(date: entry.key, matches: entry.value))
         .toList();
 
+    for (final section in sections) {
+      section.matches.sort((a, b) {
+        final aDate = a.matchDate ?? DateTime(2000);
+        final bDate = b.matchDate ?? DateTime(2000);
+        return bDate.compareTo(aDate);
+      });
+    }
+
     sections.sort((a, b) {
       final aDate = DateFormat('MMMM d, y').parse(a.date);
       final bDate = DateFormat('MMMM d, y').parse(b.date);
@@ -323,6 +331,7 @@ class _ResultData {
     required this.scoreA,
     required this.scoreB,
     required this.outcome,
+    this.matchDate,
   });
 
   factory _ResultData.fromEntry(_ResultEntry entry) {
@@ -378,6 +387,7 @@ class _ResultData {
       scoreA: scoreA,
       scoreB: scoreB,
       outcome: outcome,
+      matchDate: match.matchDate,
     );
   }
 
@@ -391,6 +401,7 @@ class _ResultData {
   final String scoreA;
   final String scoreB;
   final String outcome;
+  final DateTime? matchDate;
 
   static String _resolveFirstBattingTeam(Match match) {
     final teamA = match.teamAId;
@@ -431,6 +442,10 @@ class _ResultCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final matchTime = data.matchDate != null
+        ? DateFormat('HH:mm').format(data.matchDate!)
+        : null;
+
     return Container(
       decoration: BoxDecoration(
         color: const Color(0x800F172A),
@@ -475,6 +490,16 @@ class _ResultCard extends StatelessWidget {
                         fontSize: 12,
                       ),
                 ),
+                if (matchTime != null) ...[
+                  const SizedBox(width: 8),
+                  Text(
+                    '• $matchTime',
+                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                          color: AppPalette.textMuted,
+                          fontSize: 12,
+                        ),
+                  ),
+                ],
               ],
             ),
             const SizedBox(height: 16),

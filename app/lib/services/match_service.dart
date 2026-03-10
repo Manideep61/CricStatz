@@ -56,7 +56,7 @@ class MatchService {
         .from('matches')
         .select()
         .eq('status', 'upcoming')
-        .order('match_date', ascending: true);
+        .order('match_date', ascending: false);
 
     final upcomingMatches =
         (data as List).map((e) => Match.fromJson(e)).toList();
